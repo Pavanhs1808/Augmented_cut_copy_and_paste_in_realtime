@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 from PIL import Image, ImageFilter
 import io
@@ -14,6 +14,51 @@ import requests
 from scipy import ndimage
 from skimage import morphology, measure
 import json
+import easyocr
+import os
+import win32clipboard
+import pymeshlab
+import requests
+import sys
+import shutil
+import tempfile
+import subprocess
+import time
+# remove: "import onnxruntime as ort" and the immediate InferenceSession creation
+# keep a lazy loader so ONNX can be enabled later if you download the model
+session = None
+
+def load_onnx_model(path=None):
+    """
+    Lazy-load an ONNX model. Call load_onnx_model(path) when you have the model file.
+    """
+    try:
+        import onnxruntime as ort
+    except Exception:
+        print("onnxruntime not installed; ONNX inference disabled.")
+        return None
+
+    model_path = path or os.environ.get("MODEL_ONNX", os.path.join(os.getcwd(), "model.onnx"))
+    if os.path.exists(model_path):
+        try:
+            sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+            print(f"ONNX model loaded: {model_path}")
+            return sess
+        except Exception as e:
+            print(f"Failed to create ONNX InferenceSession: {e}")
+            return None
+    else:
+        print(f"ONNX model not found at {model_path}; inference disabled.")
+        return None
+
+# trimesh is optional; if it's not installed we keep trimesh as None
+# to allow the code to fall back to the Blender CLI conversion path.
+try:
+    import trimesh
+    print("trimesh available")
+except Exception:
+    trimesh = None
+    print("trimesh not available; install with: pip install trimesh pygltflib")
 
 app = Flask(__name__)
 CORS(app)
@@ -732,6 +777,282 @@ def index():
 
 # Load model at startup
 load_yolo_model()
+
+os.environ['EASYOCR_MODEL_STORAGE'] = os.path.join(os.getcwd(), 'easyocr_models')
+reader = easyocr.Reader(['en'])
+
+@app.route('/detect_and_ocr', methods=['POST'])
+def detect_and_ocr():
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image file provided'}), 400
+        file = request.files['image']
+        image_bytes = file.read()
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        pil_image = Image.open(io.BytesIO(image_bytes))
+
+        # YOLO object detection
+        detected_objects = detect_objects_yolo(image)
+
+        # EasyOCR text detection
+        results = reader.readtext(np.array(pil_image))
+        detected_texts = [res[1] for res in results]
+        detected_text = ' '.join(detected_texts) if detected_texts else None
+
+        return jsonify({
+            'objects': detected_objects,
+            'text': detected_text
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/paste_text', methods=['POST'])
+def paste_text():
+    try:
+        data = request.get_json()
+        text = data.get('text', '')
+        if not text:
+            return jsonify({'error': 'No text provided'}), 400
+
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(text)
+        win32clipboard.CloseClipboard()
+
+        return jsonify({'status': 'success'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/extract_frames', methods=['POST'])
+def extract_frames():
+    """Extract frames from video file, run COLMAP, convert to .glb, and upload to Lovable"""
+    try:
+        # Create unique timestamp-based directory
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        work_dir = f"workspace_{timestamp}"
+        os.makedirs(work_dir, exist_ok=True)
+        
+        # Create subdirectories
+        frames_dir = os.path.join(work_dir, "frames")
+        sparse_dir = os.path.join(work_dir, "sparse")
+        dense_dir = os.path.join(work_dir, "dense")
+        os.makedirs(frames_dir, exist_ok=True)
+        os.makedirs(sparse_dir, exist_ok=True)
+        os.makedirs(dense_dir, exist_ok=True)
+
+        if 'video' not in request.files:
+            return jsonify({'error': 'No video file provided'}), 400
+            
+        # Save video with timestamp
+        file = request.files['video']
+        video_path = os.path.join(work_dir, f'video_{timestamp}.mp4')
+        with open(video_path, 'wb') as f:
+            f.write(file.read())
+
+        # Extract frames
+        ffmpeg_cmd = f'ffmpeg -i {video_path} -vf "fps=2" {os.path.join(frames_dir, "frame_%04d.jpg")}'
+        os.system(ffmpeg_cmd)
+
+        # Run COLMAP pipeline with unique paths
+        db_path = os.path.join(work_dir, f'database_{timestamp}.db')
+        os.system(f'colmap feature_extractor --database_path {db_path} --image_path {frames_dir}')
+        os.system(f'colmap exhaustive_matcher --database_path {db_path}')
+        os.system(f'colmap mapper --database_path {db_path} --image_path {frames_dir} --output_path {sparse_dir}')
+        os.system(f'colmap image_undistorter --image_path {frames_dir} --input_path {os.path.join(sparse_dir, "0")} --output_path {dense_dir} --output_type COLMAP')
+        os.system(f'colmap patch_match_stereo --workspace_path {dense_dir} --workspace_format COLMAP --PatchMatchStereo.geom_consistency true')
+        
+        # Generate unique PLY and GLB paths
+        ply_path = os.path.join(dense_dir, f'model_{timestamp}.ply')
+        glb_path = os.path.join(dense_dir, f'model_{timestamp}.glb')
+        
+        os.system(f'colmap stereo_fusion --workspace_path {dense_dir} --workspace_format COLMAP --input_type geometric --output_path {ply_path}')
+        
+        frame_files = [f for f in os.listdir(frames_dir) if f.endswith('.jpg')]
+
+        if os.path.exists(ply_path):
+            convert_ply_to_glb(ply_path, glb_path)
+        else:
+            return jsonify({'error': '3D model (.ply) not generated'}), 500
+
+        if os.path.exists(glb_path):
+            response = send_model_to_lovable(glb_path, f"scan_{timestamp}")
+            upload_status = response.status_code
+            upload_resp = response.text
+        else:
+            return jsonify({'error': '3D model (.glb) not generated'}), 500
+
+        return jsonify({
+            'success': True,
+            'workspace': work_dir,
+            'frames': frame_files,
+            'count': len(frame_files),
+            'upload_status': upload_status,
+            'upload_response': upload_resp,
+            'model_paths': {
+                'ply': ply_path,
+                'glb': glb_path
+            }
+        })
+
+    except Exception as e:
+        print(f"Frame extraction error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/upload_frame', methods=['POST'])
+def upload_frame():
+    """
+    Receive a frame image from mobile and save to frames/ directory
+    """
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image uploaded'}), 400
+
+        file = request.files['image']
+        filename = file.filename or 'frame.jpg'
+        os.makedirs('frames', exist_ok=True)
+        save_path = os.path.join('frames', filename)
+        file.save(save_path)
+        return jsonify({'success': True, 'filename': filename}), 200
+    except Exception as e:
+        print(f"Frame upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    file = request.files['file']
+    save_path = os.path.join('frames', file.filename)
+    file.save(save_path)
+    return 'OK', 200
+
+@app.route('/download_model', methods=['GET'])
+def download_model():
+    model_path = 'dense/fused.ply'  # or .obj if you prefer
+    if os.path.exists(model_path):
+        return send_file(model_path, as_attachment=True)
+    else:
+        return jsonify({'error': 'Model not found'}), 404
+
+@app.route('/models/<filename>')
+def serve_model(filename):
+    return send_from_directory('static/models', filename)
+
+def convert_ply_to_glb(ply_path, glb_path):
+    """Convert .ply -> .glb with detailed logging"""
+    print(f"Starting PLY->GLB conversion:")
+    print(f"Input PLY: {ply_path} ({os.path.exists(ply_path)})")
+    print(f"Output GLB: {glb_path}")
+    
+    if os.path.exists(glb_path):
+        print(f"Removing existing GLB file")
+        try:
+            os.remove(glb_path)
+        except Exception as e:
+            print(f"Failed to remove existing GLB: {e}")
+
+    # Try trimesh
+    if trimesh is not None:
+        try:
+            mesh = trimesh.load(ply_path, process=False)
+            mesh.export(glb_path)
+            if os.path.exists(glb_path):
+                print(f"Successfully converted with trimesh: {os.path.getsize(glb_path)} bytes")
+                return True
+            else:
+                print("trimesh export produced no file")
+        except Exception as e:
+            print(f"trimesh conversion failed: {e}")
+
+    print("Conversion failed - no methods succeeded")
+    return False
+
+def send_model_to_lovable(model_path, name):
+    """Upload model to Lovable with detailed logging and retries"""
+    url = "https://hybrid-image-lab.lovable.app/api/upload-model/psmxw6kryh"
+    
+    # Verify file exists and is readable
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    file_size = os.path.getsize(model_path)
+    print(f"Uploading {model_path} ({file_size} bytes) to Lovable...")
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with open(model_path, "rb") as fh:
+                files = {"model": fh}
+                data = {"name": name}
+                response = requests.post(url, files=files, data=data, timeout=30)
+                
+                print(f"Lovable upload attempt {attempt + 1}:")
+                print(f"Status: {response.status_code}")
+                print(f"Response: {response.text[:500]}...")  # First 500 chars
+                
+                if response.ok:
+                    return response
+                else:
+                    print(f"Upload failed with status {response.status_code}")
+                    
+        except Exception as e:
+            print(f"Upload attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                print("Retrying...")
+                time.sleep(2)  # Wait before retry
+            continue
+    
+    raise Exception(f"Failed to upload after {max_retries} attempts")
+
+@app.route('/upload_model', methods=['POST'])
+def upload_model():
+    """
+    Accept .glb upload, save to static/models, analyze (trimesh) and optionally forward to Lovable.
+    """
+    try:
+        if 'model' not in request.files:
+            return jsonify({'error': 'No model file provided'}), 400
+
+        file = request.files['model']
+        filename = file.filename or f"model_{int(time.time())}.glb"
+        os.makedirs('static/models', exist_ok=True)
+        save_path = os.path.join('static/models', filename)
+        file.save(save_path)
+
+        info = {'filename': filename, 'size_bytes': os.path.getsize(save_path)}
+        analysis = {}
+
+        # quick trimesh analysis if available
+        if trimesh is not None:
+            try:
+                mesh = trimesh.load(save_path, force='mesh')
+                analysis['is_mesh'] = True
+                analysis['vertices'] = int(mesh.vertices.shape[0]) if hasattr(mesh, 'vertices') else None
+                analysis['faces'] = int(mesh.faces.shape[0]) if hasattr(mesh, 'faces') else None
+                try:
+                    analysis['bounds'] = mesh.bounds.tolist()
+                except Exception:
+                    analysis['bounds'] = None
+            except Exception as e:
+                analysis['error'] = str(e)
+        else:
+            analysis['warning'] = 'trimesh not installed'
+
+        info['analysis'] = analysis
+
+        # optional: forward to Lovable if client requests it
+        forward = request.form.get('forward', 'false').lower() in ('1', 'true', 'yes')
+        if forward:
+            try:
+                resp = send_model_to_lovable(save_path, filename)
+                info['forward_status'] = resp.status_code
+                info['forward_response'] = resp.text[:1000]
+            except Exception as e:
+                info['forward_error'] = str(e)
+
+        return jsonify(info), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
     load_yolo_model()
