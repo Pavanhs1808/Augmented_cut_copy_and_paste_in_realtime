@@ -109,6 +109,4 @@ See `requirements.txt`. Key packages:
 3. Test changes.
 4. Submit PR.
 
-## License
 
-[Add license if applicable]
