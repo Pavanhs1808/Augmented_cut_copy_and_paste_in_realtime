@@ -1,0 +1,17 @@
+node_modules
+.git
+*.mp4
+*.avi
+*.mov
+*.zip
+*.tar
+*.rar
+*.bak
+.DS_Store
+__pycache__
+venv
+server/
+bin/
+frames/
+sparse/
+dense/

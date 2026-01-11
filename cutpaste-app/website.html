@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paste Canvas</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+    }
+    canvas {
+      border: 2px solid #ccc;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <button id="downloadBtn" style="position:fixed;top:20px;right:20px;z-index:10;display:none;padding:10px 18px;font-size:60px;">Download Image as PNG</button>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const downloadBtn = document.getElementById("downloadBtn");
+    let lastImage = null;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    window.addEventListener("paste", (event) => {
+      const items = event.clipboardData.items;
+      for (let item of items) {
+        if (item.type.indexOf("image") !== -1) {
+          const blob = item.getAsFile();
+          const img = new Image();
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 50, 50);
+            lastImage = img;
+            downloadBtn.style.display = 'inline-block';
+          };
+          img.src = URL.createObjectURL(blob);
+        }
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!lastImage) return;
+      // Draw the image to a temp canvas to crop to image size
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = lastImage.width;
+      tempCanvas.height = lastImage.height;
+      tempCanvas.getContext('2d').drawImage(lastImage, 0, 0);
+      const link = document.createElement('a');
+      link.download = 'pasted-image.png';
+      link.href = tempCanvas.toDataURL('image/png');
+      link.click();
+    });
+  </script>
+</body>
+</html>

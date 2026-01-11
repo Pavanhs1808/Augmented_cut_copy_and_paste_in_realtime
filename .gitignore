@@ -1,0 +1,70 @@
+node_modules
+.vscode/
+.expo/
+.expo-shared/
+.expo-local/
+web-build/
+dist/
+build/
+
+# Android
+android/.gradle/
+android/.cxx/
+android/.externalNativeBuild/
+android/app/build/
+android/.idea/
+local.properties
+*.keystore
+*.jks
+
+# iOS
+ios/Pods/
+ios/build/
+*.xcworkspace
+*.xcodeproj/xcuserdata/
+
+# Dependency manager logs & locks
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+# (optionally keep package-lock.json if you want deterministic installs)
+
+# Env / secrets
+.env
+.env.*
+
+# Editor / OS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Python virtualenv
+venv/
+ENV/
+env/
+clipboard-venv/
+
+# Binaries and executables
+bin/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Server temporary files and outputs
+server/src/frames/
+server/src/dense/
+server/src/sparse/
+server/src/workspace_*/
+server/src/uploaded_video.mp4
+server/src/*.log
+
+# Misc
+*.log
+*.sqlite
+*.db

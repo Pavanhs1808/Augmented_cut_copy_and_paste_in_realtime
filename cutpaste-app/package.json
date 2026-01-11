@@ -1,0 +1,29 @@
+{
+  "dependencies": {
+    "@expo/config-plugins": "~10.1.1",
+    "axios": "^1.11.0",
+    "expo": "~54.0.23",
+    "expo-camera": "~16.1.11",
+    "expo-clipboard": "~7.1.5",
+    "expo-dev-client": "~5.2.4",
+    "expo-file-system": "~18.1.11",
+    "expo-image-manipulator": "~13.1.7",
+    "expo-image-picker": "~16.1.4",
+    "expo-linear-gradient": "~14.1.5",
+    "react": "19.0.0",
+    "react-native": "0.79.5",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1"
+  },
+  "name": "cutpaste-app",
+  "version": "1.0.0",
+  "scripts": {
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "devDependencies": {
+    "@expo/metro-config": "^54.0.9",
+    "@react-native-community/cli-platform-android": "^20.0.2"
+  }
+}

@@ -1,0 +1,29 @@
+# Entries in this file are relative to the project root.
+
+# General
+/node_modules/
+/web-build/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Android
+/android/app/build/
+/android/build/
+/android/.gradle/
+
+# iOS
+/ios/build/
+
+# Expo
+.expo/
+*.jks
+*.p12
+*.keystore
+
+# Editor-specific
+.idea/
+.vscode/
