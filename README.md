@@ -9,12 +9,6 @@ Here's the full **GitHub `README.md`** code you can copy-paste directly into you
 
 **Augmented Cut, Copy and Paste** is a cross-platform system that allows users to capture real-world objects using a mobile device, extract them using machine learning, and paste them directly into their desktop environment — all in real time. Think of it as a magical bridge between physical and digital content.
 
-## ✨ Demo
-
-*(Add GIF or YouTube demo link here if available)*
-
----
-
 ## 🚀 Features
 
 - 📷 Capture surroundings in real-time using mobile camera
